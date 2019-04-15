@@ -16,8 +16,14 @@
 @property (nonatomic, strong) NSDictionary *pendingCallFromRecents;
 @property (nonatomic) BOOL monitorAudioRouteChange;
 @property (nonatomic) BOOL enableDTMF;
+@property (nonatomic, strong) NSString *keepAliveCallback;
+@property (nonatomic) BOOL keepAlive;
+@property (nonatomic) BOOL backgroundExecution;
+
 
 - (void)updateProviderConfig;
+- (void)keepAlive:(CDVInvokedUrlCommand*)command;
+- (void)enableLimitedBackgroundExecution:(CDVInvokedUrlCommand *)command;
 - (void)setAppName:(CDVInvokedUrlCommand*)command;
 - (void)setIcon:(CDVInvokedUrlCommand*)command;
 - (void)setRingtone:(CDVInvokedUrlCommand*)command;
@@ -35,6 +41,7 @@
 - (void)receiveCallFromRecents:(NSNotification *) notification;
 - (void)setupAudioSession;
 - (void)setDTMFState:(CDVInvokedUrlCommand*)command;
+
 @end
 
 @implementation CordovaCall
@@ -94,8 +101,92 @@
 }
 
 
+- (void) keepAlive:(CDVInvokedUrlCommand*)command {
+	self.keepAliveCallback = command.callbackId;
+	BOOL keepAliveCommand = [[command.arguments objectAtIndex:0] boolValue];
+	BOOL oldValueKA = self.keepAlive;
+	self.keepAlive = keepAliveCommand;
+
+	if (keepAliveCommand && !oldValueKA) {
+		[self _keepAlive:0.2];
+	}
+}
+
+- (void) _keepAlive:(NSTimeInterval)interval {
+	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+		while (self.keepAlive) {
+			dispatch_async(dispatch_get_main_queue(), ^{
+				NSLog(@"calling... to JS");
+				
+				CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:@{}];
+				[pluginResult setKeepCallbackAsBool:YES];
+				
+				[self.commandDelegate sendPluginResult:pluginResult callbackId:self.keepAliveCallback];
+			});
+			
+			NSLog(@"resultWithStatus");
+			
+			[NSThread sleepForTimeInterval:interval];
+		}
+		
+		NSLog(@"sanaity check..");
+	});
+}
+
+- (void) enableLimitedBackgroundExecution:(CDVInvokedUrlCommand *)command {
+	BOOL backgroundExecution = [[command.arguments objectAtIndex:0] boolValue];
+	BOOL oldValueBE = self.backgroundExecution;
+	self.backgroundExecution = backgroundExecution;
+
+	if (backgroundExecution && !oldValueBE) {
+		[self _enableLimitedBackgroundExecution:10 runningTask:0];
+	}
+}
+
+- (void) _enableLimitedBackgroundExecution:(NSInteger)taskLengthInSeconds runningTask:(UIBackgroundTaskIdentifier)runningTask {
+	__block UIBackgroundTaskIdentifier rTask = runningTask;
+	
+	if (!rTask) {
+		rTask = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
+			NSLog(@"background execution expired!");
+			
+			[[UIApplication sharedApplication] endBackgroundTask:rTask];
+			rTask = UIBackgroundTaskInvalid;
+		}];
+	}
+	
+	__block UIBackgroundTaskIdentifier ntask;
+	
+	NSLog(@"dispatch... dispatch_after");
+	
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MIN(taskLengthInSeconds - 1, 1) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		if(self.backgroundExecution) {
+			
+			
+			ntask = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
+				NSLog(@"background execution expired!");
+				
+				[[UIApplication sharedApplication] endBackgroundTask:ntask];
+				ntask = UIBackgroundTaskInvalid;
+			}];
+		}
+	});
+	
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(taskLengthInSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		
+		NSLog(@"voip plugin: completion");
+		
+		
+		[[UIApplication sharedApplication] endBackgroundTask:rTask];
+		rTask = UIBackgroundTaskInvalid;
+		
+		[self _enableLimitedBackgroundExecution:taskLengthInSeconds runningTask:ntask];
+	});
+}
+
 - (void) getApplicationState:(CDVInvokedUrlCommand *)command
 {
+	NSLog(@"application state: %i", [UIApplication sharedApplication].applicationState);
 	BOOL isBackground = [UIApplication sharedApplication].applicationState == UIApplicationStateInactive || [UIApplication sharedApplication].applicationState == UIApplicationStateBackground;
 	
 	[self.commandDelegate sendPluginResult: [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:isBackground] callbackId:command.callbackId];

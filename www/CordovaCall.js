@@ -108,3 +108,11 @@ exports.on = function(e, f) {
     };
     exec(success, error, "CordovaCall", "registerEvent", [e]);
 };
+
+exports.keepAlive = function(active, keepAliveCallback, error) {
+	exec(keepAliveCallback, error , "CordovaCall", "keepAlive", [active]);
+};
+			   
+exports.limitedBackgroundExecution = function(enable, success, error) {
+	exec(success, error , "CordovaCall", "enableLimitedBackgroundExecution", [enable]);
+};
