@@ -16,7 +16,6 @@
 @property (nonatomic, strong) NSDictionary *pendingCallFromRecents;
 @property (nonatomic) BOOL monitorAudioRouteChange;
 @property (nonatomic) BOOL enableDTMF;
-@property (nonatomic, strong) NSString *keepAliveCallback;
 @property (nonatomic) BOOL keepAlive;
 @property (nonatomic) BOOL backgroundExecution;
 
@@ -63,7 +62,7 @@
 	[self.provider setDelegate:self queue:nil];
 	self.callController = [[CXCallController alloc] init];
 	//initialize callback dictionary
-	self.callbackIds = [[NSMutableDictionary alloc] initWithCapacity:12];
+	self.callbackIds = [[NSMutableDictionary alloc] initWithCapacity:13];
 	[self.callbackIds setObject:[NSMutableArray array] forKey:@"answer"];
 	[self.callbackIds setObject:[NSMutableArray array] forKey:@"reject"];
 	[self.callbackIds setObject:[NSMutableArray array] forKey:@"hangup"];
@@ -76,6 +75,8 @@
 	[self.callbackIds setObject:[NSMutableArray array] forKey:@"DTMF"];
 	[self.callbackIds setObject:[NSMutableArray array] forKey:@"hold"];
 	[self.callbackIds setObject:[NSMutableArray array] forKey:@"resume"];
+	[self.callbackIds setObject:[NSMutableArray array] forKey:@"keepAlive"];
+
 	[self.callbackIds setObject:[NSMutableArray array] forKey:@"applicationStateIsBackground"];
 	
 	
@@ -92,6 +93,14 @@
 - (void) handleBackgroundStateChange:(NSNotification*) notification {
 	BOOL backgroundState = [notification.userInfo[@"isBackground"] boolValue];
 	
+	if (self.backgroundExecution && backgroundState) {
+		NSLog(@"STARTING KEEP ALIVE");
+
+		[self keepAliveInternal:YES];
+	} else {
+		[self keepAliveInternal:NO];
+	}
+	
 	for (id callbackId in self.callbackIds[@"applicationStateIsBackground"]) {
 		CDVPluginResult* pluginResult = nil;
 		pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:backgroundState];
@@ -100,28 +109,39 @@
 	}
 }
 
-
 - (void) keepAlive:(CDVInvokedUrlCommand*)command {
-	self.keepAliveCallback = command.callbackId;
-	BOOL keepAliveCommand = [[command.arguments objectAtIndex:0] boolValue];
-	BOOL oldValueKA = self.keepAlive;
-	self.keepAlive = keepAliveCommand;
+	NSLog(@"keepAlive:(CDVInvokedUrlCommand*)command %i", [command.arguments[0] boolValue]);
 
-	if (keepAliveCommand && !oldValueKA) {
-		[self _keepAlive:0.2];
-	}
+	[self keepAliveInternal:[command.arguments[0] boolValue]];
 }
 
+- (void) keepAliveInternal:(BOOL)enable {
+	NSLog(@"keepAliveInternal %i", enable);
+	BOOL oldValueKA = self.keepAlive;
+	self.keepAlive = enable;
+	
+	if (enable && !oldValueKA) {
+		[self _keepAlive:1];
+	}
+}
+dispatch_queue_t backgroundQueue;
+
 - (void) _keepAlive:(NSTimeInterval)interval {
-	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+	
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
+		backgroundQueue = dispatch_queue_create("com.nfon.myqueue", 0);
+	});
+	dispatch_async(backgroundQueue, ^{
 		while (self.keepAlive) {
 			dispatch_async(dispatch_get_main_queue(), ^{
 				NSLog(@"calling... to JS");
 				
 				CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:@{}];
 				[pluginResult setKeepCallbackAsBool:YES];
-				
-				[self.commandDelegate sendPluginResult:pluginResult callbackId:self.keepAliveCallback];
+				for (id callbackId in self.callbackIds[@"keepAlive"]) {
+					[self.commandDelegate sendPluginResult:pluginResult callbackId:callbackId];
+				}
 			});
 			
 			NSLog(@"resultWithStatus");
@@ -139,14 +159,16 @@
 	self.backgroundExecution = backgroundExecution;
 
 	if (backgroundExecution && !oldValueBE) {
-		[self _enableLimitedBackgroundExecution:10 runningTask:0];
+		[self _enableLimitedBackgroundExecution:10 runningTask:UIBackgroundTaskInvalid];
 	}
 }
 
 - (void) _enableLimitedBackgroundExecution:(NSInteger)taskLengthInSeconds runningTask:(UIBackgroundTaskIdentifier)runningTask {
 	__block UIBackgroundTaskIdentifier rTask = runningTask;
 	
-	if (!rTask) {
+	if (rTask == UIBackgroundTaskInvalid) {
+		NSLog(@"head creating new BG task");
+		
 		rTask = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
 			NSLog(@"background execution expired!");
 			
@@ -155,14 +177,14 @@
 		}];
 	}
 	
-	__block UIBackgroundTaskIdentifier ntask;
+	__block UIBackgroundTaskIdentifier ntask = UIBackgroundTaskInvalid;
 	
-	NSLog(@"dispatch... dispatch_after");
 	
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MIN(taskLengthInSeconds - 1, 1) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
 		if(self.backgroundExecution) {
 			
-			
+			NSLog(@"creating new BG task");
+
 			ntask = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
 				NSLog(@"background execution expired!");
 				
@@ -174,19 +196,20 @@
 	
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(taskLengthInSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
 		
-		NSLog(@"voip plugin: completion");
-		
+		NSLog(@"ending old bg task");
 		
 		[[UIApplication sharedApplication] endBackgroundTask:rTask];
 		rTask = UIBackgroundTaskInvalid;
 		
-		[self _enableLimitedBackgroundExecution:taskLengthInSeconds runningTask:ntask];
+		if (self.backgroundExecution) {
+			
+			[self _enableLimitedBackgroundExecution:taskLengthInSeconds runningTask:ntask];
+		}
 	});
 }
 
 - (void) getApplicationState:(CDVInvokedUrlCommand *)command
 {
-	NSLog(@"application state: %i", [UIApplication sharedApplication].applicationState);
 	BOOL isBackground = [UIApplication sharedApplication].applicationState == UIApplicationStateInactive || [UIApplication sharedApplication].applicationState == UIApplicationStateBackground;
 	
 	[self.commandDelegate sendPluginResult: [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:isBackground] callbackId:command.callbackId];
