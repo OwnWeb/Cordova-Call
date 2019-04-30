@@ -94,8 +94,6 @@
 	BOOL backgroundState = [notification.userInfo[@"isBackground"] boolValue];
 	
 	if (self.backgroundExecution && backgroundState) {
-		NSLog(@"STARTING KEEP ALIVE");
-
 		[self keepAliveInternal:YES];
 	} else {
 		[self keepAliveInternal:NO];
@@ -110,13 +108,10 @@
 }
 
 - (void) keepAlive:(CDVInvokedUrlCommand*)command {
-	NSLog(@"keepAlive:(CDVInvokedUrlCommand*)command %i", [command.arguments[0] boolValue]);
-
 	[self keepAliveInternal:[command.arguments[0] boolValue]];
 }
 
 - (void) keepAliveInternal:(BOOL)enable {
-	NSLog(@"keepAliveInternal %i", enable);
 	BOOL oldValueKA = self.keepAlive;
 	self.keepAlive = enable;
 	
@@ -135,8 +130,6 @@ dispatch_queue_t backgroundQueue;
 	dispatch_async(backgroundQueue, ^{
 		while (self.keepAlive) {
 			dispatch_async(dispatch_get_main_queue(), ^{
-				NSLog(@"calling... to JS");
-				
 				CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:@{}];
 				[pluginResult setKeepCallbackAsBool:YES];
 				for (id callbackId in self.callbackIds[@"keepAlive"]) {
@@ -144,12 +137,8 @@ dispatch_queue_t backgroundQueue;
 				}
 			});
 			
-			NSLog(@"resultWithStatus");
-			
 			[NSThread sleepForTimeInterval:interval];
 		}
-		
-		NSLog(@"sanaity check..");
 	});
 }
 
@@ -167,11 +156,7 @@ dispatch_queue_t backgroundQueue;
 	__block UIBackgroundTaskIdentifier rTask = runningTask;
 	
 	if (rTask == UIBackgroundTaskInvalid) {
-		NSLog(@"head creating new BG task");
-		
 		rTask = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
-			NSLog(@"background execution expired!");
-			
 			[[UIApplication sharedApplication] endBackgroundTask:rTask];
 			rTask = UIBackgroundTaskInvalid;
 		}];
@@ -182,12 +167,7 @@ dispatch_queue_t backgroundQueue;
 	
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MIN(taskLengthInSeconds - 1, 1) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
 		if(self.backgroundExecution) {
-			
-			NSLog(@"creating new BG task");
-
 			ntask = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
-				NSLog(@"background execution expired!");
-				
 				[[UIApplication sharedApplication] endBackgroundTask:ntask];
 				ntask = UIBackgroundTaskInvalid;
 			}];
@@ -195,9 +175,6 @@ dispatch_queue_t backgroundQueue;
 	});
 	
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(taskLengthInSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-		
-		NSLog(@"ending old bg task");
-		
 		[[UIApplication sharedApplication] endBackgroundTask:rTask];
 		rTask = UIBackgroundTaskInvalid;
 		
@@ -485,11 +462,6 @@ dispatch_queue_t backgroundQueue;
 	}
 }
 
-- (void)providerDidReset:(CXProvider *)provider
-{
-	NSLog(@"%s","providerdidreset");
-}
-
 - (void)provider:(CXProvider *)provider performStartCallAction:(CXStartCallAction *)action
 {
 	[self setupAudioSession];
@@ -514,8 +486,6 @@ dispatch_queue_t backgroundQueue;
 		self.pendingCallFromRecents = callData;
 	}
 	[action fulfill];
-	
-	//[action fail];
 }
 
 - (void)provider:(CXProvider *)provider didActivateAudioSession:(AVAudioSession *)audioSession
