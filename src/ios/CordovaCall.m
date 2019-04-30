@@ -16,8 +16,13 @@
 @property (nonatomic, strong) NSDictionary *pendingCallFromRecents;
 @property (nonatomic) BOOL monitorAudioRouteChange;
 @property (nonatomic) BOOL enableDTMF;
+@property (nonatomic) BOOL keepAlive;
+@property (nonatomic) BOOL backgroundExecution;
+
 
 - (void)updateProviderConfig;
+- (void)keepAlive:(CDVInvokedUrlCommand*)command;
+- (void)enableLimitedBackgroundExecution:(CDVInvokedUrlCommand *)command;
 - (void)setAppName:(CDVInvokedUrlCommand*)command;
 - (void)setIcon:(CDVInvokedUrlCommand*)command;
 - (void)setRingtone:(CDVInvokedUrlCommand*)command;
@@ -35,6 +40,7 @@
 - (void)receiveCallFromRecents:(NSNotification *) notification;
 - (void)setupAudioSession;
 - (void)setDTMFState:(CDVInvokedUrlCommand*)command;
+
 @end
 
 @implementation CordovaCall
@@ -56,7 +62,7 @@
 	[self.provider setDelegate:self queue:nil];
 	self.callController = [[CXCallController alloc] init];
 	//initialize callback dictionary
-	self.callbackIds = [[NSMutableDictionary alloc] initWithCapacity:12];
+	self.callbackIds = [[NSMutableDictionary alloc] initWithCapacity:13];
 	[self.callbackIds setObject:[NSMutableArray array] forKey:@"answer"];
 	[self.callbackIds setObject:[NSMutableArray array] forKey:@"reject"];
 	[self.callbackIds setObject:[NSMutableArray array] forKey:@"hangup"];
@@ -69,6 +75,8 @@
 	[self.callbackIds setObject:[NSMutableArray array] forKey:@"DTMF"];
 	[self.callbackIds setObject:[NSMutableArray array] forKey:@"hold"];
 	[self.callbackIds setObject:[NSMutableArray array] forKey:@"resume"];
+	[self.callbackIds setObject:[NSMutableArray array] forKey:@"keepAlive"];
+
 	[self.callbackIds setObject:[NSMutableArray array] forKey:@"applicationStateIsBackground"];
 	
 	
@@ -85,6 +93,12 @@
 - (void) handleBackgroundStateChange:(NSNotification*) notification {
 	BOOL backgroundState = [notification.userInfo[@"isBackground"] boolValue];
 	
+	if (self.backgroundExecution && backgroundState) {
+		[self keepAliveInternal:YES];
+	} else {
+		[self keepAliveInternal:NO];
+	}
+	
 	for (id callbackId in self.callbackIds[@"applicationStateIsBackground"]) {
 		CDVPluginResult* pluginResult = nil;
 		pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:backgroundState];
@@ -93,6 +107,83 @@
 	}
 }
 
+- (void) keepAlive:(CDVInvokedUrlCommand*)command {
+	[self keepAliveInternal:[command.arguments[0] boolValue]];
+}
+
+- (void) keepAliveInternal:(BOOL)enable {
+	BOOL oldValueKA = self.keepAlive;
+	self.keepAlive = enable;
+	
+	if (enable && !oldValueKA) {
+		[self _keepAlive:1];
+	}
+}
+dispatch_queue_t backgroundQueue;
+
+- (void) _keepAlive:(NSTimeInterval)interval {
+	
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
+		backgroundQueue = dispatch_queue_create("com.nfon.myqueue", 0);
+	});
+	dispatch_async(backgroundQueue, ^{
+		while (self.keepAlive) {
+			dispatch_async(dispatch_get_main_queue(), ^{
+				CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:@{}];
+				[pluginResult setKeepCallbackAsBool:YES];
+				for (id callbackId in self.callbackIds[@"keepAlive"]) {
+					[self.commandDelegate sendPluginResult:pluginResult callbackId:callbackId];
+				}
+			});
+			
+			[NSThread sleepForTimeInterval:interval];
+		}
+	});
+}
+
+- (void) enableLimitedBackgroundExecution:(CDVInvokedUrlCommand *)command {
+	BOOL backgroundExecution = [[command.arguments objectAtIndex:0] boolValue];
+	BOOL oldValueBE = self.backgroundExecution;
+	self.backgroundExecution = backgroundExecution;
+
+	if (backgroundExecution && !oldValueBE) {
+		[self _enableLimitedBackgroundExecution:10 runningTask:UIBackgroundTaskInvalid];
+	}
+}
+
+- (void) _enableLimitedBackgroundExecution:(NSInteger)taskLengthInSeconds runningTask:(UIBackgroundTaskIdentifier)runningTask {
+	__block UIBackgroundTaskIdentifier rTask = runningTask;
+	
+	if (rTask == UIBackgroundTaskInvalid) {
+		rTask = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
+			[[UIApplication sharedApplication] endBackgroundTask:rTask];
+			rTask = UIBackgroundTaskInvalid;
+		}];
+	}
+	
+	__block UIBackgroundTaskIdentifier ntask = UIBackgroundTaskInvalid;
+	
+	
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MIN(taskLengthInSeconds - 1, 1) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		if(self.backgroundExecution) {
+			ntask = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
+				[[UIApplication sharedApplication] endBackgroundTask:ntask];
+				ntask = UIBackgroundTaskInvalid;
+			}];
+		}
+	});
+	
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(taskLengthInSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		[[UIApplication sharedApplication] endBackgroundTask:rTask];
+		rTask = UIBackgroundTaskInvalid;
+		
+		if (self.backgroundExecution) {
+			
+			[self _enableLimitedBackgroundExecution:taskLengthInSeconds runningTask:ntask];
+		}
+	});
+}
 
 - (void) getApplicationState:(CDVInvokedUrlCommand *)command
 {
@@ -371,11 +462,6 @@
 	}
 }
 
-- (void)providerDidReset:(CXProvider *)provider
-{
-	NSLog(@"%s","providerdidreset");
-}
-
 - (void)provider:(CXProvider *)provider performStartCallAction:(CXStartCallAction *)action
 {
 	[self setupAudioSession];
@@ -400,8 +486,6 @@
 		self.pendingCallFromRecents = callData;
 	}
 	[action fulfill];
-	
-	//[action fail];
 }
 
 - (void)provider:(CXProvider *)provider didActivateAudioSession:(AVAudioSession *)audioSession
