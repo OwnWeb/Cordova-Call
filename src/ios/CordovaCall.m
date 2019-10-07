@@ -49,8 +49,8 @@ static CordovaCall* _instance = nil;
 	
 	[self.callbackIds setObject:[NSMutableArray array] forKey:@"applicationStateIsBackground"];
 	
-	
 	self.receivedUUIDsToRemoteHandles = [NSMutableDictionary dictionary];
+	self.callIDtoUUID = [NSMutableDictionary dictionary];
 	//	self.uuidToCallID = [NSMutableDictionary dictionary];
 	
 	//allows user to make call from recents
@@ -264,8 +264,6 @@ dispatch_queue_t backgroundQueue;
 
 - (void)receiveCall:(CDVInvokedUrlCommand*)command
 {
-	// name, number, callID, supportsHolding
-	//	BOOL hasId = ![[command.arguments objectAtIndex:1] isEqual:[NSNull null]];
 	NSString* callName = [command.arguments objectAtIndex:0];
 	NSString* callNumber = [command.arguments objectAtIndex:1];
 	NSString* callID = [command.arguments objectAtIndex:2];
@@ -274,7 +272,11 @@ dispatch_queue_t backgroundQueue;
 	[[NSUserDefaults standardUserDefaults] setObject:callName forKey:callNumber];
 	[[NSUserDefaults standardUserDefaults] synchronize];
 	
-	[self _receiveCall:callID callerNumber:callNumber callerName:callName supportsHolding:supportsHolding callbackid:command.callbackId];
+	if (!self.callIDtoUUID[callID]) {
+		[self _receiveCall:callID callerNumber:callNumber callerName:callName supportsHolding:supportsHolding callbackid:command.callbackId];
+	} else {
+		NSLog(@"CordovaCall prevented rereporting known callID");
+	}
 }
 
 - (void) _receiveCall:(NSString*)callID callerNumber:(NSString*)callerNumber callerName:(NSString*)callName supportsHolding:(BOOL)supportsHolding  callbackid:(NSString*)callbackid {
@@ -363,29 +365,28 @@ dispatch_queue_t backgroundQueue;
 	[self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 }
 
-- (void)endCall:(CDVInvokedUrlCommand*)command
+
+- (void)endCall:(CDVInvokedUrlCommand*)command {
+	NSUUID* callUUID = [[NSUUID alloc] initWithUUIDString:[command.arguments objectAtIndex:0]];
+	BOOL recentsIntegration = [[command.arguments objectAtIndex:1] boolValue];
+	[self _endCall:callUUID preventRecentsIntegration:recentsIntegration callbackID:command.callbackId];
+}
+
+- (void)_endCall:(NSUUID*)callUUID preventRecentsIntegration:(BOOL)preventRecentsIntegration callbackID:(NSString*)callbackId
 {
-	NSUUID* callUUID = nil;
-	if (
-		[command.arguments objectAtIndex:0] != nil && [command.arguments objectAtIndex:0] != (id)[NSNull null] &&
-		(callUUID = [[NSUUID alloc] initWithUUIDString:[command.arguments objectAtIndex:0]]) != nil){
-		
-		if (command.arguments.count > 1 &&
-			[command.arguments objectAtIndex:1] != nil &&
-			[command.arguments objectAtIndex:1] != (id)[NSNull null] &&
-			[command.arguments[1] boolValue]) {
+	if (callUUID){
+		if (preventRecentsIntegration) {
 			[self setRecentsIntegration:NO];
-			
 			[NSTimer scheduledTimerWithTimeInterval:.03 target:self selector:@selector(activateRecentsIntegration) userInfo:nil repeats:NO];
 		}
 		
 		CXEndCallAction *endCallAction = [[CXEndCallAction alloc] initWithCallUUID:callUUID];
 		CXTransaction *transaction = [[CXTransaction alloc] initWithAction:endCallAction];
 		[self.callController requestTransaction:transaction completion:^(NSError * _Nullable error) {
-			if (error == nil) {
-				[self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"Call ended successfully"] callbackId:command.callbackId];
-			} else {
-				[self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error localizedDescription]] callbackId:command.callbackId];
+			if (error == nil && callbackId) {
+				[self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"Call ended successfully"] callbackId:callbackId];
+			} else if (callbackId) {
+				[self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error localizedDescription]] callbackId:callbackId];
 			}
 		}];
 	} else if ([self.callController.callObserver.calls count] > 0) {
@@ -399,9 +400,12 @@ dispatch_queue_t backgroundQueue;
 				}
 			}];
 		}
-		[self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"Call ended successfully"] callbackId:command.callbackId];
-	} else {
-		[self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"No calls found."] callbackId:command.callbackId];
+		
+		if (callbackId){
+			[self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"Call ended successfully"] callbackId:callbackId];
+		}
+	} else if (callbackId) {
+		[self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"No calls found."] callbackId:callbackId];
 	}
 }
 
@@ -772,6 +776,19 @@ dispatch_queue_t backgroundQueue;
 	// Process the received push
 	NSLog(@"CC 1 VoipPush Plugin incoming payload: %@", payload.dictionaryPayload);
 	
+	NSString* callerName = payload.dictionaryPayload[@"aps"][@"callerName"];
+	NSString* callerNumber = payload.dictionaryPayload[@"aps"][@"callerNumber"];
+	NSString* callID = payload.dictionaryPayload[@"aps"][@"callID"];
+	
+	NSString* ringingStatus = payload.dictionaryPayload[@"aps"][@"ringingStatus"]; //ended | ringing
+	NSString* reason = payload.dictionaryPayload[@"aps"][@"reason"];
+	
+	if (callID && [@"ringing" isEqual:ringingStatus]) {
+		[self _receiveCall:callID callerNumber:callerNumber callerName:(callerName ? callerName : callerNumber) supportsHolding:@YES callbackid:nil];
+	} else if (callID && self.callIDtoUUID[callID] && [@"ended" isEqual:ringingStatus]) {
+		[self _endCall:self.callIDtoUUID[callID] preventRecentsIntegration:[@"pickedUp" isEqual:reason] callbackID:nil];
+	}
+	
 	if ([payload.type isEqualToString:@"PKPushTypeVoIP"]) {
 		NSMutableDictionary* pushMessage = [NSMutableDictionary dictionaryWithCapacity:2];
 		[pushMessage setObject:payload.dictionaryPayload forKey:@"payload"];
@@ -785,11 +802,6 @@ dispatch_queue_t backgroundQueue;
 		[self.commandDelegate sendPluginResult:pluginResult callbackId:self.callbackId];
 	}
 	
-	NSString* testID = @"whefiuhwiu";
-	NSString* testName = @"TestName";
-	NSString* testNumber = @"110";
-	
-	[self _receiveCall:testID callerNumber:testNumber callerName:testName supportsHolding:@YES callbackid:nil];
 	
 	completion();
 }

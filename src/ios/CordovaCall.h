@@ -18,8 +18,7 @@
 @property (nonatomic) BOOL shouldIncludeInRecents;
 @property (nonatomic, strong) NSMutableDictionary *callbackIds;
 @property (nonatomic, strong) NSMutableDictionary *receivedUUIDsToRemoteHandles;
-//@property (nonatomic, strong) NSMutableDictionary<NSString*, NSString*> *uuidToCallID;
-//@property (nonatomic, strong) NSMutableDictionary<NSString*, NSString*> *callIDtoCallUUID;
+@property (nonatomic, strong) NSMutableDictionary<NSString*, NSUUID*> *callIDtoUUID;
 
 @property (nonatomic, strong) NSDictionary *pendingCallFromRecents;
 @property (nonatomic) BOOL monitorAudioRouteChange;
