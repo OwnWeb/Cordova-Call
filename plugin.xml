@@ -47,5 +47,6 @@
     </config-file>
     <source-file src="src/ios/AppDelegateCordovaCall.m" />
     <source-file src="src/ios/CordovaCall.m" />
+    <source-file src="src/ios/CordovaCall.h" />
   </platform>
 </plugin>
