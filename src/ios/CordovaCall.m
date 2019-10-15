@@ -492,6 +492,10 @@ dispatch_queue_t backgroundQueue;
 {
 	NSLog(@"activated audio");
 	self.monitorAudioRouteChange = YES;
+	
+	NSMutableDictionary* userInfo = [NSMutableDictionary dictionary];
+	[userInfo setValue:AVAudioSessionInterruptionTypeEnded forKey:AVAudioSessionInterruptionTypeKey];
+	[[NSNotificationCenter defaultCenter] postNotificationName:AVAudioSessionInterruptionNotification object: self userInfo:userInfo];
 }
 
 - (void)provider:(CXProvider *)provider didDeactivateAudioSession:(AVAudioSession *)audioSession
@@ -501,11 +505,18 @@ dispatch_queue_t backgroundQueue;
 
 - (void)provider:(CXProvider *)provider performSetHeldCallAction:(CXSetHeldCallAction *)action {
 	NSArray* callbacks = action.onHold ? self.callbackIds[@"hold"] : self.callbackIds[@"resume"];
-	
+
 	for (id callbackId in callbacks) {
 		CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[action.callUUID UUIDString]];;
 		[pluginResult setKeepCallbackAsBool:YES];
 		[self.commandDelegate sendPluginResult:pluginResult callbackId:callbackId];
+	}
+	
+	if (action.onHold){
+		[[AVAudioSession sharedInstance] setActive:NO error:nil];
+	} else {
+		[self setupAudioSession];
+		[[AVAudioSession sharedInstance] setActive:YES error:nil];
 	}
 	
 	[action fulfill];
@@ -629,6 +640,11 @@ dispatch_queue_t backgroundQueue;
 	
 	[action fulfill];
 }
+
+- (void)providerDidReset:(nonnull CXProvider *)provider {
+	
+}
+
 
 
 - (void)setMuteCall:(CDVInvokedUrlCommand*)command
