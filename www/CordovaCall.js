@@ -116,3 +116,7 @@ exports.keepAlive = function(active, success, error) {
 exports.limitedBackgroundExecution = function(enable, success, error) {
   exec(success, error , "CordovaCall", "enableLimitedBackgroundExecution", [enable]);
 };
+
+exports.holdStatusChanged = function(callUUID, holdstatus, success, error) {
+  exec(success, error, "CordovaCall", "holdStatusChanged", [callUUID, holdstatus]);
+};

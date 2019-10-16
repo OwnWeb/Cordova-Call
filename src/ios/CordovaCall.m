@@ -2,6 +2,7 @@
 #import <CallKit/CallKit.h>
 #import <AVFoundation/AVFoundation.h>
 
+
 @interface CordovaCall : CDVPlugin <CXProviderDelegate>
 @property (nonatomic, strong) CXProvider *provider;
 @property (nonatomic, strong) CXCallController *callController;
@@ -21,6 +22,7 @@
 
 
 - (void)updateProviderConfig;
+
 - (void)keepAlive:(CDVInvokedUrlCommand*)command;
 - (void)enableLimitedBackgroundExecution:(CDVInvokedUrlCommand *)command;
 - (void)setAppName:(CDVInvokedUrlCommand*)command;
@@ -40,6 +42,7 @@
 - (void)receiveCallFromRecents:(NSNotification *) notification;
 - (void)setupAudioSession;
 - (void)setDTMFState:(CDVInvokedUrlCommand*)command;
+- (void)holdStatusChanged:(CDVInvokedUrlCommand *)command;
 
 @end
 
@@ -422,6 +425,19 @@ dispatch_queue_t backgroundQueue;
 	}
 }
 
+- (void) holdStatusChanged:(CDVInvokedUrlCommand *)command {
+	NSUUID* callUUID;
+	if ((callUUID = [[NSUUID alloc] initWithUUIDString:[command.arguments objectAtIndex:0]]) != nil){
+		CXSetHeldCallAction *holdCallAction = [[CXSetHeldCallAction alloc] initWithCallUUID:callUUID onHold:[command.arguments[1] boolValue]];
+		CXTransaction *transaction = [[CXTransaction alloc] initWithAction:holdCallAction];
+
+		[self.callController requestTransaction:transaction completion:^(NSError *error) {}];
+	}
+	
+	[self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"Success"] callbackId:command.callbackId];
+}
+
+
 - (void) activateRecentsIntegration {
 	[self setRecentsIntegration:YES];
 }
@@ -492,10 +508,7 @@ dispatch_queue_t backgroundQueue;
 {
 	NSLog(@"activated audio");
 	self.monitorAudioRouteChange = YES;
-	
-	NSMutableDictionary* userInfo = [NSMutableDictionary dictionary];
-	[userInfo setValue:AVAudioSessionInterruptionTypeEnded forKey:AVAudioSessionInterruptionTypeKey];
-	[[NSNotificationCenter defaultCenter] postNotificationName:AVAudioSessionInterruptionNotification object: self userInfo:userInfo];
+	[self fireAVAudioSessionInterruptionNotification];
 }
 
 - (void)provider:(CXProvider *)provider didDeactivateAudioSession:(AVAudioSession *)audioSession
@@ -642,7 +655,7 @@ dispatch_queue_t backgroundQueue;
 }
 
 - (void)providerDidReset:(nonnull CXProvider *)provider {
-	
+	NSLog(@"PROVIDER DID RESET!!");
 }
 
 
@@ -756,6 +769,14 @@ dispatch_queue_t backgroundQueue;
 		}
 		[self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 	}
+}
+
+- (void) fireAVAudioSessionInterruptionNotification {
+	// Workaround for libWebRTC bug: https://bugs.chromium.org/p/webrtc/issues/detail?id=8126
+	
+	NSMutableDictionary* userInfo = [NSMutableDictionary dictionary];
+	[userInfo setValue:AVAudioSessionInterruptionTypeEnded forKey:AVAudioSessionInterruptionTypeKey];
+	[[NSNotificationCenter defaultCenter] postNotificationName:AVAudioSessionInterruptionNotification object: self userInfo:userInfo];
 }
 
 @end
