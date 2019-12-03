@@ -519,18 +519,19 @@ dispatch_queue_t backgroundQueue;
 - (void)provider:(CXProvider *)provider performSetHeldCallAction:(CXSetHeldCallAction *)action {
 	NSArray* callbacks = action.onHold ? self.callbackIds[@"hold"] : self.callbackIds[@"resume"];
 
+	NSLog(@"hold action!!!  ");
 	for (id callbackId in callbacks) {
 		CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[action.callUUID UUIDString]];;
 		[pluginResult setKeepCallbackAsBool:YES];
 		[self.commandDelegate sendPluginResult:pluginResult callbackId:callbackId];
 	}
 	
-	if (action.onHold){
-		[[AVAudioSession sharedInstance] setActive:NO error:nil];
-	} else {
-		[self setupAudioSession];
-		[[AVAudioSession sharedInstance] setActive:YES error:nil];
-	}
+//	if (action.onHold){
+//		[[AVAudioSession sharedInstance] setActive:NO error:nil];
+//	} else {
+//		[self setupAudioSession];
+//		[[AVAudioSession sharedInstance] setActive:YES error:nil];
+//	}
 	
 	[action fulfill];
 }
@@ -538,6 +539,7 @@ dispatch_queue_t backgroundQueue;
 - (void)provider:(CXProvider *)provider performAnswerCallAction:(CXAnswerCallAction *)action
 {
 	[self setupAudioSession];
+	
 	for (id callbackId in self.callbackIds[@"answer"]) {
 		CDVPluginResult* pluginResult = nil;
 		pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[action.callUUID UUIDString]];
@@ -599,12 +601,14 @@ dispatch_queue_t backgroundQueue;
 {
 	@try {
 		AVAudioSession *sessionInstance = [AVAudioSession sharedInstance];
-		[sessionInstance setCategory:AVAudioSessionCategoryPlayAndRecord error:nil];
+		
+		[sessionInstance setCategory:AVAudioSessionCategoryPlayAndRecord mode:AVAudioSessionModeDefault options:0 error:nil];
+		[sessionInstance setActive:YES error:nil];
 		[sessionInstance setMode:AVAudioSessionModeVoiceChat error:nil];
 		NSTimeInterval bufferDuration = .005;
 		[sessionInstance setPreferredIOBufferDuration:bufferDuration error:nil];
 		[sessionInstance setPreferredSampleRate:44100 error:nil];
-		
+
 		NSLog(@"Configuring Audio");
 	}
 	@catch (NSException *exception) {
@@ -657,8 +661,6 @@ dispatch_queue_t backgroundQueue;
 - (void)providerDidReset:(nonnull CXProvider *)provider {
 	NSLog(@"PROVIDER DID RESET!!");
 }
-
-
 
 - (void)setMuteCall:(CDVInvokedUrlCommand*)command
 {
@@ -772,11 +774,32 @@ dispatch_queue_t backgroundQueue;
 }
 
 - (void) fireAVAudioSessionInterruptionNotification {
+	AVAudioSession* sessionInstance = [AVAudioSession sharedInstance];
+
+	BOOL wasSpeaker = [sessionInstance.currentRoute.outputs.firstObject.portType isEqual: @"Speaker"];
+	
+	if (wasSpeaker) {
+		[sessionInstance overrideOutputAudioPort:AVAudioSessionPortOverrideNone error:nil];
+	} else {
+		[sessionInstance overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:nil];
+	}
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		NSLog(@"interrupting..");
+
+		if (wasSpeaker) {
+			[sessionInstance overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:nil];
+		} else {
+			[sessionInstance overrideOutputAudioPort:AVAudioSessionPortOverrideNone error:nil];
+		}
+		
+		
+	});
 	// Workaround for libWebRTC bug: https://bugs.chromium.org/p/webrtc/issues/detail?id=8126
 	
 	NSMutableDictionary* userInfo = [NSMutableDictionary dictionary];
 	[userInfo setValue:AVAudioSessionInterruptionTypeEnded forKey:AVAudioSessionInterruptionTypeKey];
-	[[NSNotificationCenter defaultCenter] postNotificationName:AVAudioSessionInterruptionNotification object: self userInfo:userInfo];
+	[[NSNotificationCenter defaultCenter] postNotificationName:AVAudioSessionInterruptionNotification object:self userInfo:userInfo];
 }
+	
 
 @end
