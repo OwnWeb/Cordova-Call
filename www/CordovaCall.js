@@ -1,5 +1,21 @@
 var exec = require('cordova/exec');
 
+exports.registerVoipPush = function(tokenCallback,notificationCallback) {
+  if (!tokenCallback) { tokenCallback = function() {}; }
+  if (!notificationCallback) { notificationCallback = function() {}; }
+
+  var errorCallback = function() {};
+  var successCallback = function(obj) {
+     if (obj.hasOwnProperty('token')) {
+        tokenCallback(obj);
+     } else if (obj.hasOwnProperty('payload')) {
+        notificationCallback(obj);
+     }
+  };
+
+  exec(successCallback, errorCallback, 'CordovaCall', 'voipRegistration' );
+};
+
 exports.setAppName = function(appName, success, error) {
     exec(success, error, "CordovaCall", "setAppName", [appName]);
 };
@@ -40,7 +56,7 @@ exports.setVideo = function(value, success, error) {
     }
 };
 
-exports.receiveCall = function(from, id, supportsHold, success, error) {
+exports.receiveCall = function(name, number, id, supportsHold, success, error) {
     if(typeof id == "function") {
       error = success;
       success = id;
@@ -48,19 +64,11 @@ exports.receiveCall = function(from, id, supportsHold, success, error) {
     } else if(id) {
       id = id.toString();
     }
-    exec(success, error, "CordovaCall", "receiveCall", [from, id, supportsHold]);
+    exec(success, error, "CordovaCall", "receiveCall", [name, number, id, supportsHold]);
 };
 
-exports.sendCall = function(to, id, supportsHold, success, error) {
-  if(typeof id == "function") {
-    error = success;
-    success = id;
-    id = undefined;
-    supportsHold = undefined;
-  } else if(id) {
-    id = id.toString();
-  }
-  exec(success, error, "CordovaCall", "sendCall", [to, id, supportsHold]);
+exports.sendCall = function(name, number, callId, supportsHold, success, error) {
+  exec(success, error, "CordovaCall", "sendCall", [name, number, callId, supportsHold]);
 };
 
 exports.connectCall = function(uuid, success, error) {
