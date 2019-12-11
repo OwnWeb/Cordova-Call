@@ -828,13 +828,21 @@ dispatch_queue_t backgroundQueue;
 	}];
 }
 
+- (void)pushRegistry:(PKPushRegistry *)registry didInvalidatePushTokenForType:(PKPushType)type {
+	NSLog(@"CC 1 VoipPush Plugin invalidate token: %@", type);
+
+}
+
 // Handle updated push credentials
 - (void)pushRegistry:(PKPushRegistry *)registry didUpdatePushCredentials: (PKPushCredentials *)credentials forType:(NSString *)type {
 	NSLog(@"CC 1 VoipPush Plugin token received: %@", credentials.token);
 	
-	NSString *token = [[[[credentials.token description] stringByReplacingOccurrencesOfString:@"<"withString:@""]
-						stringByReplacingOccurrencesOfString:@">" withString:@""]
-					   stringByReplacingOccurrencesOfString: @" " withString: @""];
+//	NSString *token = [[[[credentials.token description] stringByReplacingOccurrencesOfString:@"<"withString:@""]
+//						stringByReplacingOccurrencesOfString:@">" withString:@""]
+//					   stringByReplacingOccurrencesOfString: @" " withString: @""];
+	
+	NSString *token = [CordovaCall hexadecimalStringFromData:credentials.token];
+	
 	
 	NSMutableDictionary* pushMessage = [NSMutableDictionary dictionaryWithCapacity:2];
 	[pushMessage setObject:token forKey:@"token"];
@@ -896,5 +904,19 @@ dispatch_queue_t backgroundQueue;
 //	}
 //}
 
++ (NSString *)hexadecimalStringFromData:(NSData *)data
+{
+    NSUInteger dataLength = data.length;
+    if (dataLength == 0) {
+        return nil;
+    }
+      
+    const unsigned char *dataBuffer = data.bytes;
+    NSMutableString *hexString  = [NSMutableString stringWithCapacity:(dataLength * 2)];
+    for (int i = 0; i < dataLength; ++i) {
+        [hexString appendFormat:@"%02x", dataBuffer[i]];
+    }
+    return [hexString copy];
+}
 
 @end
