@@ -46,7 +46,6 @@ static CordovaCall* _instance = nil;
 
 	[self.callbackIds setObject:[NSMutableArray array] forKey:@"applicationStateIsBackground"];
 	
-	
 	self.receivedUUIDsToRemoteHandles = [NSMutableDictionary dictionary];
 	
 	//allows user to make call from recents
@@ -55,6 +54,13 @@ static CordovaCall* _instance = nil;
 	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleAudioRouteChange:) name:AVAudioSessionRouteChangeNotification object:nil];
 	
 	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleBackgroundStateChange:) name:@"com.nfon.applicationstate.isBackground" object:nil];
+}
+
+- (NSMutableDictionary<NSString*, NSUUID*>*) callIDtoUUID {
+	if (!_callIDtoUUID) {
+		_callIDtoUUID = [NSMutableDictionary dictionary];
+    }
+    return _callIDtoUUID;
 }
 
 - (void) handleBackgroundStateChange:(NSNotification*) notification {
@@ -277,11 +283,13 @@ dispatch_queue_t backgroundQueue;
 }
 
 
-- (void) _receiveCall:(NSString*)callID callerNumber:(NSString*)callerNumber callerName:(NSString*)callName supportsHolding:(BOOL)supportsHolding  callbackid:(NSString*)callbackid {
+- (NSUUID*) _receiveCall:(NSString*)callID callerNumber:(NSString*)callerNumber callerName:(NSString*)callName supportsHolding:(BOOL)supportsHolding  callbackid:(NSString*)callbackid {
 	NSUUID *callUUID = [[NSUUID alloc] init];
-	self.callIDtoUUID[callID] = callUUID;
+	if (!callbackid) {
+		self.callIDtoUUID[callID] = callUUID;
+	}
 	
-	if (callName != nil && [callName length] > 0) {
+	if (callName != nil) {
 		CXHandle *handle = [[CXHandle alloc] initWithType:CXHandleTypePhoneNumber value:callerNumber];
 		self.receivedUUIDsToRemoteHandles[callUUID] = handle;
 		
@@ -316,6 +324,8 @@ dispatch_queue_t backgroundQueue;
 			[self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Caller id can't be empty"] callbackId:callbackid];
 		}
 	}
+	
+	return callUUID;
 }
 
 - (void)sendCall:(CDVInvokedUrlCommand*)command
@@ -325,7 +335,6 @@ dispatch_queue_t backgroundQueue;
 	NSString* callId = [command.arguments objectAtIndex:1];
 
 	NSUUID *callUUID = [[NSUUID alloc] init];
-	
 	
 	if (![callName isEqualToString:@""]) {
 		[[NSUserDefaults standardUserDefaults] setObject:callName forKey:[command.arguments objectAtIndex:1]];
@@ -368,14 +377,37 @@ dispatch_queue_t backgroundQueue;
 	[self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 }
 
+
+- (void)updateDisplayStringForCallWithUUID:(CDVInvokedUrlCommand*)command {
+	CDVPluginResult* pluginResult = nil;
+	NSUUID* callUUID = nil;
+	if (
+		[command.arguments objectAtIndex:0] != nil && [command.arguments objectAtIndex:0] != (id)[NSNull null] &&
+		[command.arguments objectAtIndex:1] != nil && [command.arguments objectAtIndex:1] != (id)[NSNull null] &&
+		(callUUID = [[NSUUID alloc] initWithUUIDString:[command.arguments objectAtIndex:0]]) != nil){
+		[self _updateDisplayStringForCallWithUUID:callUUID to:[command.arguments objectAtIndex:1]];
+		
+		pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"Call updated successfully"];
+	} else {
+		pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"No UUID found in command."];
+	}
+}
+
+- (void)_updateDisplayStringForCallWithUUID:(NSUUID*)uuid to:(NSString*)displayedString {
+	CXCallUpdate *callUpdate = [[CXCallUpdate alloc] init];
+	callUpdate.remoteHandle = [[CXHandle alloc] initWithType:CXHandleTypePhoneNumber value:displayedString];
+	callUpdate.localizedCallerName = displayedString;
+	[self.provider reportCallWithUUID:uuid updated:callUpdate];
+}
+
 - (void)endCall:(CDVInvokedUrlCommand*)command {
 	NSUUID* callUUID = [[NSUUID alloc] initWithUUIDString:[command.arguments objectAtIndex:0]];
 	BOOL recentsIntegration = [[command.arguments objectAtIndex:1] boolValue];
+	
 	[self _endCall:callUUID preventRecentsIntegration:recentsIntegration callbackID:command.callbackId];
 }
 
-- (void)_endCall:(NSUUID*)callUUID preventRecentsIntegration:(BOOL)preventRecentsIntegration callbackID:(NSString*)callbackId
-{
+- (void)_endCall:(NSUUID*)callUUID preventRecentsIntegration:(BOOL)preventRecentsIntegration callbackID:(NSString*)callbackId {
 	if (callUUID){
 		if (preventRecentsIntegration) {
 			[self setRecentsIntegration:NO];
@@ -425,9 +457,6 @@ dispatch_queue_t backgroundQueue;
 
 - (void) holdStatusChanged:(CDVInvokedUrlCommand *)command {
 	NSUUID* callUUID;
-	NSLog(@"holdStatusChanged [%@]: %i",[command.arguments objectAtIndex:0], [command.arguments[1] boolValue]);
-
-	
 	if ((callUUID = [[NSUUID alloc] initWithUUIDString:[command.arguments objectAtIndex:0]]) != nil){
 		CXSetHeldCallAction *holdCallAction = [[CXSetHeldCallAction alloc] initWithCallUUID:callUUID onHold:[command.arguments[1] boolValue]];
 		CXTransaction *transaction = [[CXTransaction alloc] initWithAction:holdCallAction];
@@ -520,19 +549,11 @@ dispatch_queue_t backgroundQueue;
 - (void)provider:(CXProvider *)provider performSetHeldCallAction:(CXSetHeldCallAction *)action {
 	NSArray* callbacks = action.onHold ? self.callbackIds[@"hold"] : self.callbackIds[@"resume"];
 
-	NSLog(@"hold action!!!  ");
 	for (id callbackId in callbacks) {
 		CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[action.callUUID UUIDString]];;
 		[pluginResult setKeepCallbackAsBool:YES];
 		[self.commandDelegate sendPluginResult:pluginResult callbackId:callbackId];
 	}
-	
-//	if (action.onHold){
-//		[[AVAudioSession sharedInstance] setActive:NO error:nil];
-//	} else {
-//		[self setupAudioSession];
-//		[[AVAudioSession sharedInstance] setActive:YES error:nil];
-//	}
 	
 	[action fulfill];
 }
@@ -647,7 +668,6 @@ dispatch_queue_t backgroundQueue;
 
 - (void)provider:(CXProvider *)provider performPlayDTMFCallAction:(CXPlayDTMFCallAction *)action
 {
-	NSLog(@"DTMF Event");
 	NSString *digits = action.digits;
 	for (id callbackId in self.callbackIds[@"DTMF"]) {
 		CDVPluginResult* pluginResult = nil;
@@ -785,8 +805,6 @@ dispatch_queue_t backgroundQueue;
 		[sessionInstance overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:nil];
 	}
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-		NSLog(@"interrupting..");
-
 		if (wasSpeaker) {
 			[sessionInstance overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:nil];
 		} else {
@@ -795,8 +813,8 @@ dispatch_queue_t backgroundQueue;
 		
 		
 	});
-	// Workaround for libWebRTC bug: https://bugs.chromium.org/p/webrtc/issues/detail?id=8126
 	
+	// Workaround for libWebRTC bug: https://bugs.chromium.org/p/webrtc/issues/detail?id=8126
 	NSMutableDictionary* userInfo = [NSMutableDictionary dictionary];
 	[userInfo setValue:AVAudioSessionInterruptionTypeEnded forKey:AVAudioSessionInterruptionTypeKey];
 	[[NSNotificationCenter defaultCenter] postNotificationName:AVAudioSessionInterruptionNotification object:self userInfo:userInfo];
@@ -829,20 +847,12 @@ dispatch_queue_t backgroundQueue;
 }
 
 - (void)pushRegistry:(PKPushRegistry *)registry didInvalidatePushTokenForType:(PKPushType)type {
-	NSLog(@"CC 1 VoipPush Plugin invalidate token: %@", type);
-
+	NSLog(@"CordovaCall Plugin invalidate token: %@", type);
 }
 
 // Handle updated push credentials
 - (void)pushRegistry:(PKPushRegistry *)registry didUpdatePushCredentials: (PKPushCredentials *)credentials forType:(NSString *)type {
-	NSLog(@"CC 1 VoipPush Plugin token received: %@", credentials.token);
-	
-//	NSString *token = [[[[credentials.token description] stringByReplacingOccurrencesOfString:@"<"withString:@""]
-//						stringByReplacingOccurrencesOfString:@">" withString:@""]
-//					   stringByReplacingOccurrencesOfString: @" " withString: @""];
-	
 	NSString *token = [CordovaCall hexadecimalStringFromData:credentials.token];
-	
 	
 	NSMutableDictionary* pushMessage = [NSMutableDictionary dictionaryWithCapacity:2];
 	[pushMessage setObject:token forKey:@"token"];
@@ -855,19 +865,16 @@ dispatch_queue_t backgroundQueue;
 
 - (void)pushRegistry:(PKPushRegistry *)registry didReceiveIncomingPushWithPayload:(PKPushPayload *)payload forType:(PKPushType)type withCompletionHandler:(void (^)(void))completion {
 	// Process the received push
-	NSLog(@"CC 1 VoipPush Plugin incoming payload: %@", payload.dictionaryPayload);
-	
 	NSString* callerName = payload.dictionaryPayload[@"aps"][@"caller_name"];
 	NSString* callerNumber = payload.dictionaryPayload[@"aps"][@"caller_number"];
 	NSString* callID = payload.dictionaryPayload[@"aps"][@"call_id"];
-	
-	NSString* triggerType = payload.dictionaryPayload[@"aps"][@"type"]; //INVITE | CANCEL
-	NSString* reason = payload.dictionaryPayload[@"aps"][@"reason"];
+	NSString* triggerType = payload.dictionaryPayload[@"aps"][@"type"]; //INVITE
 	
 	if (callID && [@"INVITE" isEqual:triggerType]) {
 		[self _receiveCall:callID callerNumber:callerNumber callerName:(callerName ? callerName : callerNumber) supportsHolding:YES callbackid:nil];
-	} else if (callID && self.callIDtoUUID[callID] && [@"CANCEL" isEqual:triggerType]) {
-		[self _endCall:self.callIDtoUUID[callID] preventRecentsIntegration:[@"200" isEqual:reason] callbackID:nil];
+	} else {
+		[self absorbIllegalPush];
+		NSLog(@"CordovaCall: Invalid/Illegal push notification received via push...  Simulating call to prevent worse consequences.");
 	}
 	
 	if ([payload.type isEqualToString:@"PKPushTypeVoIP"]) {
@@ -886,23 +893,10 @@ dispatch_queue_t backgroundQueue;
 	completion();
 }
 
-//- (void)pushRegistry:(PKPushRegistry *)registry didReceiveIncomingPushWithPayload:(PKPushPayload *)payload forType:(NSString *)type {
-//	// Process the received push
-//	NSLog(@"CC VoipPush Plugin incoming payload: %@", payload.dictionaryPayload);
-//
-//	if ([payload.type isEqualToString:@"PKPushTypeVoIP"]) {
-//		NSMutableDictionary* pushMessage = [NSMutableDictionary dictionaryWithCapacity:2];
-//		[pushMessage setObject:payload.dictionaryPayload forKey:@"payload"];
-//		[pushMessage setObject:payload.type forKey:@"type"];
-//
-//		CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:pushMessage];
-//		[pluginResult setKeepCallbackAsBool:YES];
-//		[self.commandDelegate sendPluginResult:pluginResult callbackId:self.callbackId];
-//	} else {
-//		CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Invalid push type received"];
-//		[self.commandDelegate sendPluginResult:pluginResult callbackId:self.callbackId];
-//	}
-//}
+- (void) absorbIllegalPush {
+	NSUUID* uuid = [self _receiveCall:@"-1" callerNumber:@"" callerName:@"" supportsHolding:YES callbackid:nil];
+	[self _endCall:uuid preventRecentsIntegration:YES callbackID:nil];
+}
 
 + (NSString *)hexadecimalStringFromData:(NSData *)data
 {

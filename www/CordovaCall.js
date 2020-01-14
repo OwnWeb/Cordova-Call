@@ -71,6 +71,10 @@ exports.sendCall = function(name, number, callId, supportsHold, success, error) 
   exec(success, error, "CordovaCall", "sendCall", [name, number, callId, supportsHold]);
 };
 
+exports.updateDisplayStringForCallWithUUID = function(uuid, displayString, success, error) {
+  exec(success, error, "CordovaCall", "updateDisplayStringForCallWithUUID", [uuid, displayString]);
+};
+
 exports.connectCall = function(uuid, success, error) {
     exec(success, error, "CordovaCall", "connectCall", [uuid]);
 };
