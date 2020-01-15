@@ -314,10 +314,12 @@ dispatch_queue_t backgroundQueue;
 				}
 			}
 		}];
-		for (id callbackId in self.callbackIds[@"receiveCall"]) {
-			CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:@{@"callUUID": [callUUID UUIDString], @"callID": callID}];
-			[pluginResult setKeepCallbackAsBool:YES];
-			[self.commandDelegate sendPluginResult:pluginResult callbackId:callbackId];
+		if (!callbackid) {
+			for (id callbackId in self.callbackIds[@"receiveCall"]) {
+				CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:@{@"callUUID": [callUUID UUIDString], @"callID": callID}];
+				[pluginResult setKeepCallbackAsBool:YES];
+				[self.commandDelegate sendPluginResult:pluginResult callbackId:callbackId];
+			}
 		}
 	} else {
 		if (callbackid){
