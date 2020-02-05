@@ -6,12 +6,6 @@
 
 @implementation CordovaCall
 
-static CordovaCall* _instance = nil;
-
-+ (id)sharedInstance {
-	return _instance;
-}
-
 - (void)pluginInitialize
 {
 	CXProviderConfiguration *providerConfiguration;
@@ -289,7 +283,7 @@ dispatch_queue_t backgroundQueue;
 		self.callIDtoUUID[callID] = callUUID;
 	}
 	
-	if (callName != nil) {
+	if (callName) {
 		CXHandle *handle = [[CXHandle alloc] initWithType:CXHandleTypePhoneNumber value:callerNumber];
 		self.receivedUUIDsToRemoteHandles[callUUID] = handle;
 		
@@ -300,7 +294,6 @@ dispatch_queue_t backgroundQueue;
 		callUpdate.supportsUngrouping = NO;
 		callUpdate.supportsHolding = supportsHolding;
 		callUpdate.supportsDTMF = self.enableDTMF;
-		
 		[self.provider reportNewIncomingCallWithUUID:callUUID update:callUpdate completion:^(NSError * _Nullable error) {
 			if(error == nil) {
 				
@@ -868,10 +861,14 @@ dispatch_queue_t backgroundQueue;
 - (void)pushRegistry:(PKPushRegistry *)registry didReceiveIncomingPushWithPayload:(PKPushPayload *)payload forType:(PKPushType)type withCompletionHandler:(void (^)(void))completion {
 	// Process the received push
 	NSString* callerName = payload.dictionaryPayload[@"aps"][@"caller_name"];
+	callerName = ![callerName isEqual:[NSNull null]] ? callerName : nil;
 	NSString* callerNumber = payload.dictionaryPayload[@"aps"][@"caller_number"];
+	callerNumber = ![callerNumber isEqual:[NSNull null]] ? callerNumber : nil;
 	NSString* callID = payload.dictionaryPayload[@"aps"][@"call_id"];
+	callID = ![callID isEqual:[NSNull null]] ? callID : nil;
 	NSString* triggerType = payload.dictionaryPayload[@"aps"][@"type"]; //INVITE
-	
+	triggerType = ![triggerType isEqual:[NSNull null]] ? triggerType : nil;
+
 	if (callID && [@"INVITE" isEqual:triggerType]) {
 		[self _receiveCall:callID callerNumber:callerNumber callerName:(callerName ? callerName : callerNumber) supportsHolding:YES callbackid:nil];
 	} else {
