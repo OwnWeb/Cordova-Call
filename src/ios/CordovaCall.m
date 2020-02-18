@@ -266,8 +266,12 @@ dispatch_queue_t backgroundQueue;
 	NSString* callID = [command.arguments objectAtIndex:2];
 	BOOL supportsHolding = [[command.arguments objectAtIndex:3] boolValue];
 	
-	[[NSUserDefaults standardUserDefaults] setObject:callName forKey:callNumber];
-	[[NSUserDefaults standardUserDefaults] synchronize];
+	callName = [[NSNull null] isEqual:callName] ? nil : callName;
+	
+	if (callName) {
+		[[NSUserDefaults standardUserDefaults] setObject:callName forKey:callNumber];
+		[[NSUserDefaults standardUserDefaults] synchronize];
+	}
 	
 	if (!self.callIDtoUUID[callID]) {
 		[self _receiveCall:callID callerNumber:callNumber callerName:callName supportsHolding:supportsHolding callbackid:command.callbackId];
@@ -283,40 +287,34 @@ dispatch_queue_t backgroundQueue;
 		self.callIDtoUUID[callID] = callUUID;
 	}
 	
-	if (callName) {
-		CXHandle *handle = [[CXHandle alloc] initWithType:CXHandleTypePhoneNumber value:callerNumber];
-		self.receivedUUIDsToRemoteHandles[callUUID] = handle;
-		
-		CXCallUpdate *callUpdate = [[CXCallUpdate alloc] init];
-		callUpdate.hasVideo = self.hasVideo;
-		callUpdate.localizedCallerName = callName;
-		callUpdate.supportsGrouping = NO;
-		callUpdate.supportsUngrouping = NO;
-		callUpdate.supportsHolding = supportsHolding;
-		callUpdate.supportsDTMF = self.enableDTMF;
-		[self.provider reportNewIncomingCallWithUUID:callUUID update:callUpdate completion:^(NSError * _Nullable error) {
-			if(error == nil) {
-				
-				if (callbackid) {
-					[self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[callUUID UUIDString]] callbackId:callbackid];
-				}
-			} else {
-				if (callbackid){
-					[self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error localizedDescription]] callbackId:callbackid];
-					
-				}
+	CXHandle *handle = [[CXHandle alloc] initWithType:CXHandleTypePhoneNumber value:callerNumber];
+	self.receivedUUIDsToRemoteHandles[callUUID] = handle;
+	
+	CXCallUpdate *callUpdate = [[CXCallUpdate alloc] init];
+	callUpdate.hasVideo = self.hasVideo;
+	callUpdate.localizedCallerName = callName ? callName : callerNumber;
+	callUpdate.supportsGrouping = NO;
+	callUpdate.supportsUngrouping = NO;
+	callUpdate.supportsHolding = supportsHolding;
+	callUpdate.supportsDTMF = self.enableDTMF;
+	[self.provider reportNewIncomingCallWithUUID:callUUID update:callUpdate completion:^(NSError * _Nullable error) {
+		if(error == nil) {
+			
+			if (callbackid) {
+				[self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[callUUID UUIDString]] callbackId:callbackid];
 			}
-		}];
-		if (!callbackid) {
-			for (id callbackId in self.callbackIds[@"receiveCall"]) {
-				CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:@{@"callUUID": [callUUID UUIDString], @"callID": callID}];
-				[pluginResult setKeepCallbackAsBool:YES];
-				[self.commandDelegate sendPluginResult:pluginResult callbackId:callbackId];
+		} else {
+			if (callbackid){
+				[self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error localizedDescription]] callbackId:callbackid];
+				
 			}
 		}
-	} else {
-		if (callbackid){
-			[self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Caller id can't be empty"] callbackId:callbackid];
+	}];
+	if (!callbackid) {
+		for (id callbackId in self.callbackIds[@"receiveCall"]) {
+			CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:@{@"callUUID": [callUUID UUIDString], @"callID": callID}];
+			[pluginResult setKeepCallbackAsBool:YES];
+			[self.commandDelegate sendPluginResult:pluginResult callbackId:callbackId];
 		}
 	}
 	
@@ -859,6 +857,8 @@ dispatch_queue_t backgroundQueue;
 }
 
 - (void)pushRegistry:(PKPushRegistry *)registry didReceiveIncomingPushWithPayload:(PKPushPayload *)payload forType:(PKPushType)type withCompletionHandler:(void (^)(void))completion {
+	NSLog(@"push received: %@", payload.dictionaryPayload);
+	
 	// Process the received push
 	NSString* callerName = payload.dictionaryPayload[@"aps"][@"caller_name"];
 	callerName = ![callerName isEqual:[NSNull null]] ? callerName : nil;
