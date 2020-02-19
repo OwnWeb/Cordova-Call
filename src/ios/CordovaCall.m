@@ -857,7 +857,6 @@ dispatch_queue_t backgroundQueue;
 }
 
 - (void)pushRegistry:(PKPushRegistry *)registry didReceiveIncomingPushWithPayload:(PKPushPayload *)payload forType:(PKPushType)type withCompletionHandler:(void (^)(void))completion {
-	NSLog(@"push received: %@", payload.dictionaryPayload);
 	
 	// Process the received push
 	NSString* callerName = payload.dictionaryPayload[@"aps"][@"caller_name"];
