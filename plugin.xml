@@ -37,6 +37,8 @@
     <config-file target="*-Info.plist" parent="UIBackgroundModes">
       <array>
         <string>voip</string>
+        <string>remote-notification</string>
+        <string>processing</string>
       </array>
     </config-file>
     <config-file target="*-Info.plist" parent="NSUserActivityTypes">
