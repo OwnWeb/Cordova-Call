@@ -616,7 +616,6 @@ dispatch_queue_t backgroundQueue;
 {
 	@try {
 		AVAudioSession *sessionInstance = [AVAudioSession sharedInstance];
-		
 		[sessionInstance setCategory:AVAudioSessionCategoryPlayAndRecord mode:AVAudioSessionModeDefault options:0 error:nil];
 		[sessionInstance setActive:YES error:nil];
 		[sessionInstance setMode:AVAudioSessionModeVoiceChat error:nil];
@@ -790,7 +789,7 @@ dispatch_queue_t backgroundQueue;
 - (void) fireAVAudioSessionInterruptionNotification {
 	AVAudioSession* sessionInstance = [AVAudioSession sharedInstance];
 
-	BOOL wasSpeaker = [sessionInstance.currentRoute.outputs.firstObject.portType isEqual: @"Speaker"];
+	BOOL wasSpeaker = [sessionInstance.currentRoute.outputs.firstObject.portType isEqual:AVAudioSessionPortBuiltInSpeaker];
 	
 	if (wasSpeaker) {
 		[sessionInstance overrideOutputAudioPort:AVAudioSessionPortOverrideNone error:nil];
@@ -803,8 +802,6 @@ dispatch_queue_t backgroundQueue;
 		} else {
 			[sessionInstance overrideOutputAudioPort:AVAudioSessionPortOverrideNone error:nil];
 		}
-		
-		
 	});
 	
 	// Workaround for libWebRTC bug: https://bugs.chromium.org/p/webrtc/issues/detail?id=8126
