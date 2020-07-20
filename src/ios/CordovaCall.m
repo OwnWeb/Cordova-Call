@@ -312,7 +312,7 @@ dispatch_queue_t backgroundQueue;
 	}];
 	if (!callbackid) {
 		for (id callbackId in self.callbackIds[@"receiveCall"]) {
-			CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:@{@"callUUID": [callUUID UUIDString], @"callID": callID}];
+			CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:@{@"callUUID": [callUUID UUIDString], @"callID": callID, @"number": callerNumber}];
 			[pluginResult setKeepCallbackAsBool:YES];
 			[self.commandDelegate sendPluginResult:pluginResult callbackId:callbackId];
 		}
