@@ -42,6 +42,8 @@
 	
 	self.receivedUUIDsToRemoteHandles = [NSMutableDictionary dictionary];
 	
+	self.backgroundTaskIdentifier = UIBackgroundTaskInvalid;
+	
 	//allows user to make call from recents
 	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(receiveCallFromRecents:) name:@"RecentsCallNotification" object:nil];
 	//detect Audio Route Changes to make speakerOn and speakerOff event handlers
@@ -109,53 +111,51 @@ dispatch_queue_t backgroundQueue;
 	});
 }
 
+
 - (void) enableLimitedBackgroundExecution:(CDVInvokedUrlCommand *)command {
 	BOOL backgroundExecution = [[command.arguments objectAtIndex:0] boolValue];
-	BOOL oldValueBE = self.backgroundExecution;
 	self.backgroundExecution = backgroundExecution;
 
-	if (backgroundExecution && !oldValueBE) {
-		[self _enableLimitedBackgroundExecution:10 runningTask:UIBackgroundTaskInvalid];
+	if (backgroundExecution && self.backgroundTaskIdentifier == UIBackgroundTaskInvalid) {
+
+		self.backgroundTaskIdentifier = [self _enableLimitedBackgroundExecutionWithCallback:^{
+			CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:true];
+			[self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+		}];
+		NSLog(@"Started BG TASK %f", [[UIApplication sharedApplication] backgroundTimeRemaining]);
+
+	} else if (self.backgroundTaskIdentifier != UIBackgroundTaskInvalid) {
+		UIBackgroundTaskIdentifier identifier = self.backgroundTaskIdentifier;
+		self.backgroundTaskIdentifier = UIBackgroundTaskInvalid;
+		NSLog(@"Ending TASK %f", [[UIApplication sharedApplication] backgroundTimeRemaining]);
+		CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:true];
+		[self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+		[[UIApplication sharedApplication] endBackgroundTask:identifier];
 	}
 }
 
-- (void) _enableLimitedBackgroundExecution:(NSInteger)taskLengthInSeconds runningTask:(UIBackgroundTaskIdentifier)runningTask {
-	__block UIBackgroundTaskIdentifier rTask = runningTask;
-	
-	if (rTask == UIBackgroundTaskInvalid) {
-		rTask = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
-			[[UIApplication sharedApplication] endBackgroundTask:rTask];
-			rTask = UIBackgroundTaskInvalid;
-		}];
-	}
-	
-	__block UIBackgroundTaskIdentifier ntask = UIBackgroundTaskInvalid;
-	
-	
-	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MIN(taskLengthInSeconds - 1, 1) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-		if(self.backgroundExecution) {
-			ntask = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
-				[[UIApplication sharedApplication] endBackgroundTask:ntask];
-				ntask = UIBackgroundTaskInvalid;
-			}];
-		}
-	});
-	
-	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(taskLengthInSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-		[[UIApplication sharedApplication] endBackgroundTask:rTask];
-		rTask = UIBackgroundTaskInvalid;
-		
-		if (self.backgroundExecution) {
+- (UIBackgroundTaskIdentifier)  _enableLimitedBackgroundExecutionWithCallback:(void (^)(void))callback {
+		return [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
+				NSTimeInterval secondsUntilCallback = MAX([[UIApplication sharedApplication] backgroundTimeRemaining] - 3, 0);
+				NSTimeInterval secondsUntilTaskExpiration = MIN([[UIApplication sharedApplication] backgroundTimeRemaining], secondsUntilCallback + 1);
+
+				dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(secondsUntilCallback  * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+					callback();
+				});
 			
-			[self _enableLimitedBackgroundExecution:taskLengthInSeconds runningTask:ntask];
-		}
-	});
+				dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(secondsUntilTaskExpiration  * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+					UIBackgroundTaskIdentifier identifier = self.backgroundTaskIdentifier;
+					self.backgroundTaskIdentifier = UIBackgroundTaskInvalid;
+					NSLog(@"Expiration: ending TASK %f", [[UIApplication sharedApplication] backgroundTimeRemaining]);
+
+					[[UIApplication sharedApplication] endBackgroundTask:identifier];
+				});
+		}];
 }
 
 - (void) getApplicationState:(CDVInvokedUrlCommand *)command
 {
 	BOOL isBackground = [UIApplication sharedApplication].applicationState == UIApplicationStateInactive || [UIApplication sharedApplication].applicationState == UIApplicationStateBackground;
-	
 	[self.commandDelegate sendPluginResult: [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:isBackground] callbackId:command.callbackId];
 }
 
