@@ -26,6 +26,7 @@
 @property (nonatomic) BOOL keepAlive;
 @property (nonatomic) BOOL backgroundExecution;
 @property (nonatomic, copy) NSString *callbackId;
+@property (nonatomic) UIBackgroundTaskIdentifier backgroundTaskIdentifier;
 
 - (void)voipRegistration:(CDVInvokedUrlCommand*)command;
 
