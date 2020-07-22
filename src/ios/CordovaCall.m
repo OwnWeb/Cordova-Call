@@ -124,7 +124,7 @@ dispatch_queue_t backgroundQueue;
 		}];
 		NSLog(@"Started BG TASK %f", [[UIApplication sharedApplication] backgroundTimeRemaining]);
 
-	} else if (self.backgroundTaskIdentifier != UIBackgroundTaskInvalid) {
+	} else if (!backgroundExecution && self.backgroundTaskIdentifier != UIBackgroundTaskInvalid) {
 		UIBackgroundTaskIdentifier identifier = self.backgroundTaskIdentifier;
 		self.backgroundTaskIdentifier = UIBackgroundTaskInvalid;
 		NSLog(@"Ending TASK %f", [[UIApplication sharedApplication] backgroundTimeRemaining]);
